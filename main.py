@@ -54,6 +54,7 @@ cmd_data=[]
 # simulation object
 sim = RigidRotor(inertia, friction, torque, sampling_time, control_sampling_time)
 
+
 # main loop 10[sec]
 for i in range(simulation_time*(int)(1/sim.sampling_time)):
     time = i * sim.sampling_time
