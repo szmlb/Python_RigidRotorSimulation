@@ -36,6 +36,12 @@ class RigidRotor:
         self.xvec[1] = self.xvec[1] + self.dxvec[1] * self.sampling_time
 
 # simulation parameters
+inertia=0.1
+friction=0.0
+torque = 0.0
+
+sampling_time = 0.001
+control_sampling_time=0.001
 simulation_time = 3
 
 # state parameters and data for plot
@@ -43,8 +49,10 @@ xvec0_data=[]
 xvec1_data=[]
 cmd_data=[]
 
+
+
 # simulation object
-sim = RigidRotor(inertia=0.1, friction=0.0, torque = 0.0,sampling_time = 0.001, control_sampling_time=0.001)
+sim = RigidRotor(inertia, friction, torque, sampling_time, control_sampling_time)
 
 # main loop 10[sec]
 for i in range(simulation_time*(int)(1/sim.sampling_time)):
