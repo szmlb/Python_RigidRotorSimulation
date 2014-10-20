@@ -5,6 +5,24 @@ Simulation program
 import numpy as np
 import pylab as pl
 
+class Controller:
+    def __init__(self):
+        self.error_integral = 0;
+        self.error_diff = 0
+        self.error_diff_ = 0
+        self.error_ = 0
+            
+    def PIDcontroller(self, error, Kp, Ki, Kd, dt, wc_diff):
+        self.error_diff = (self.error_diff_ + wc_diff * (error - self.error_)) / (1.0 + wc_diff * dt) 
+        self.error_integral = self.error_integral + error * dt
+        
+        input = Kp * error + Kd * self.error_diff + Ki * self.error_integral;
+
+        self.error_diff_ = self.error_diff
+        self.error_ = error        
+        
+        return input
+
 class RigidRotor:
 
     def __init__(self,
@@ -49,11 +67,9 @@ xvec0_data=[]
 xvec1_data=[]
 cmd_data=[]
 
-
-
 # simulation object
 sim = RigidRotor(inertia, friction, torque, sampling_time, control_sampling_time)
-
+controller = Controller()
 
 # main loop 10[sec]
 for i in range(simulation_time*(int)(1/sim.sampling_time)):
@@ -73,14 +89,11 @@ for i in range(simulation_time*(int)(1/sim.sampling_time)):
         kp = wn**2 * sim.inertia
         kd = 2.0 * zeta * wn * sim.inertia - sim.friction
 
-        # P control
+        # PID control
         theta_cmd = 1.0
         theta_res = sim.xvec[0]
-        sim.torque = kp * (theta_cmd - theta_res)
-        # D control
-        dtheta_cmd = 0.0
-        dtheta_res = sim.xvec[1]
-        sim.torque = sim.torque + kd * (dtheta_cmd - dtheta_res)
+        error = theta_cmd - theta_res
+        sim.torque = controller.PIDcontroller(error, kp, 0, kd, sim.control_sampling_time, 200.0)        
 
         #data update
         xvec0_data.append(sim.xvec[0])
