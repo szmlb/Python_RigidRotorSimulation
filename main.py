@@ -111,7 +111,7 @@ for i in range(simulation_time*(int)(1/sim.sampling_time)):
         sim.torque = sim.torque + dist
 
         # DOB
-        dist = controller.disturbance_observer(inertia, sim.torque, sim.xvec[1], 500.0)
+        dist = controller.disturbance_observer(inertia, sim.torque, sim.xvec[1], 300.0)
 
         #data update
         xvec0_data.append(sim.xvec[0])
