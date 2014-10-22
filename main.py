@@ -5,6 +5,7 @@ Simulation program
 import numpy as np
 import pylab as pl
 import control as ctrl
+import utility
 
 class RigidRotor:
 
@@ -44,11 +45,16 @@ class Controller:
         self.tmp2_dob = 0.0            
 
         #system matrices
-        self.Ac = np.array([[0, 1], [0, rigidrotor.damping / rigidrotor.inertia]])
+        self.Ac = np.array([[0, 1], [0, -rigidrotor.damping / rigidrotor.inertia]])
         self.Bc = np.array([[0], [1 / rigidrotor.inertia]])
         self.Cc = np.array([[1, 0]])
         self.Dc = 0.0        
-            
+        #discretized system matrices
+        self.Ad, self.Bd = utility.c2d(self.Ac, self.Bc, self.dt)
+        self.Cd = self.Cc
+        self.Dd = self.Dc
+
+    #classical PID controller            
     def pid_controller(self, error, Kp, Ki, Kd, wc_diff):
         self.error_diff = (self.error_diff_ + wc_diff * (error - self.error_)) / (1.0 + wc_diff * self.dt) 
         self.error_integral = self.error_integral + error * self.dt
@@ -59,14 +65,30 @@ class Controller:
         self.error_ = error        
 
         return input        
-        
-    def disturbance_observer(self, tau, dq, wc_dob):
+ 
+    #disturbance observer
+    def simple_dob(self, tau, dq, wc_dob):
         self.tmp1_dob = tau + rigidrotor.inertia * wc_dob * dq;
         self.tmp2_dob = (self.tmp2_dob + self.dt * wc_dob * self.tmp1_dob) / (1 + self.dt * wc_dob);
         dist = self.tmp2_dob - rigidrotor.inertia * wc_dob * dq; 
 
         return dist
 
+    #Observer design based disturbance observer
+
+    #Kalman filter
+    def kalman_filter(self, Ad, Bd, Bud, Cd, Q, R, u, y, xhat, P):
+        #prior estimated value
+        xhatm = Ad.dot(xhat) + Bud * u    # state
+        print xhatm
+        Pm = Ad.dot(P.dot(Ad.transpose())) + Bd.dot(Q.dot(Bd.transpose())) # error covariance
+        #kalman gain matrix
+        G = Pm.dot(Cd.transpose()) / (Cd.dot(Pm.dot(Cd.transpose())) + R);
+        #posterior estimated value
+        xhat_new = xhatm + G.dot(y - Cd.dot(xhatm)) #state 
+        P_new = (np.eye(np.size(Ad)/2) - G.dot(Cd) ).dot(Pm);    #error covariance
+        
+        return xhat_new, P_new, G
 
 # simulation parameters
 inertia=0.1
@@ -80,6 +102,8 @@ simulation_time = 3
 # state parameters and data for plot
 xvec0_data=[]
 xvec1_data=[]
+xvec0_hat_data=[]
+xvec1_hat_data=[]
 cmd_data=[]
 
 # rigidrotorulation object
@@ -97,6 +121,7 @@ for i in range(simulation_time*(int)(1/rigidrotor.sampling_time)):
         if i == 0 :
             dist = 0.0
             torque_reac = 0.0
+            xvec_hat_before = np.array([[0.0], [0.0]]) #for kalman filter
 
         # position controller
         # pole assignment (second order vibration system)
@@ -114,11 +139,23 @@ for i in range(simulation_time*(int)(1/rigidrotor.sampling_time)):
         rigidrotor.torque = rigidrotor.torque + dist
 
         # DOB
-        dist = controller.disturbance_observer(rigidrotor.torque, rigidrotor.xvec[1], 300.0)
+        dist = controller.simple_dob(rigidrotor.torque, rigidrotor.xvec[1], 300.0)
+
+        # kalman filter for state estimation
+        ukalman = np.array([rigidrotor.torque])
+        ykalman = np.array([rigidrotor.xvec[0]])
+        gamma = 1.0 * 10.0**10
+        Pkalman = gamma * np.eye(2)
+        Qkalman = gamma * np.eye(1)
+        Rkalman = 1.0 * np.eye(1)
+        xvec_hat, Pkalman, Gkalman = controller.kalman_filter(controller.Ad, controller.Bd, controller.Bd, controller.Cd, Qkalman, Rkalman, ukalman, ykalman, xvec_hat_before, Pkalman)
+        xvec_hat_before = xvec_hat
 
         #data update
         xvec0_data.append(rigidrotor.xvec[0])
         xvec1_data.append(rigidrotor.xvec[1])
+        xvec0_hat_data.append(xvec_hat[0])
+        xvec1_hat_data.append(xvec_hat[1])
         cmd_data.append(theta_cmd)
 
         """ controller end """
@@ -126,7 +163,7 @@ for i in range(simulation_time*(int)(1/rigidrotor.sampling_time)):
     """ plant """
     #reaction torque
     if time > 1.5:
-        torque_reac = 10.0
+        torque_reac = 0.0
 
     # derivative calculation
     rigidrotor.dxvec = rigidrotor.calc_derivative(torque_reac)
@@ -137,10 +174,21 @@ for i in range(simulation_time*(int)(1/rigidrotor.sampling_time)):
 
 # data plot
 time_data = np.arange(0, 3, controller.dt)
+pl.figure()
 pl.plot(time_data, cmd_data[:], label="theta cmd")
 pl.plot(time_data, xvec0_data[:], label="theta res")
+pl.plot(time_data, xvec0_hat_data[:], label="theta estimated")
 pl.legend()
 pl.grid()
 pl.xlabel('time [s]')
 pl.ylabel('angle [rad]')
+
+pl.figure()
+pl.plot(time_data, xvec1_data[:], label="omega res")
+pl.plot(time_data, xvec1_hat_data[:], label="omega estimated")
+pl.legend()
+pl.grid()
+pl.xlabel('time [s]')
+pl.ylabel('angular velocity [rad/sec]')
+
 pl.show()
