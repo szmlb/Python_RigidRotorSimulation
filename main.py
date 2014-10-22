@@ -4,9 +4,35 @@ Simulation program
 """
 import numpy as np
 import pylab as pl
+import control as ctrl
+
+class RigidRotor:
+
+    def __init__(self,
+                 inertia,
+                 damping,
+                 torque,
+                 sampling_time
+                ):
+        # plant parameters and simulation conditions
+        self.inertia = inertia
+        self.damping = damping
+        self.torque = torque
+        self.sampling_time = sampling_time
+  
+        self.xvec = [0.0, 0.0]
+
+    # calculate derivative of state value
+    def calc_derivative(self, torque_reac):
+        return (self.xvec[1], - self.damping / self.inertia * self.xvec[1] + (1.0 / self.inertia) * (self.torque - torque_reac) )
+
+    # update 
+    def update(self):
+        self.xvec[0] = self.xvec[0] + self.dxvec[0] * self.sampling_time
+        self.xvec[1] = self.xvec[1] + self.dxvec[1] * self.sampling_time
 
 class Controller:
-    def __init__(self, dt):
+    def __init__(self, dt, rigidrotor):
         self.dt = dt
         #for pid
         self.error_integral = 0
@@ -16,8 +42,14 @@ class Controller:
         #for DOB
         self.tmp1_dob = 0.0
         self.tmp2_dob = 0.0            
+
+        #system matrices
+        self.Ac = np.array([[0, 1], [0, rigidrotor.damping / rigidrotor.inertia]])
+        self.Bc = np.array([[0], [1 / rigidrotor.inertia]])
+        self.Cc = np.array([[1, 0]])
+        self.Dc = 0.0        
             
-    def pid_controller(self, error, Kp, Ki, Kd, dt, wc_diff):
+    def pid_controller(self, error, Kp, Ki, Kd, wc_diff):
         self.error_diff = (self.error_diff_ + wc_diff * (error - self.error_)) / (1.0 + wc_diff * self.dt) 
         self.error_integral = self.error_integral + error * self.dt
         
@@ -28,42 +60,13 @@ class Controller:
 
         return input        
         
-    def disturbance_observer(self, Jm, tau, dq, wc_dob):
-        self.tmp1_dob = tau + Jm * wc_dob * dq;
+    def disturbance_observer(self, tau, dq, wc_dob):
+        self.tmp1_dob = tau + rigidrotor.inertia * wc_dob * dq;
         self.tmp2_dob = (self.tmp2_dob + self.dt * wc_dob * self.tmp1_dob) / (1 + self.dt * wc_dob);
-        dist = self.tmp2_dob - Jm * wc_dob * dq; 
+        dist = self.tmp2_dob - rigidrotor.inertia * wc_dob * dq; 
 
         return dist
 
-class RigidRotor:
-
-    def __init__(self,
-                 inertia,
-                 damping,
-                 torque,
-                 sampling_time,
-                 control_sampling_time
-                 ):
-        # plant parameters and simulation conditions
-        self.inertia = inertia
-        self.damping = damping
-        self.torque = torque
-        self.sampling_time = sampling_time
-        self.control_sampling_time = control_sampling_time
-
-        self.xvec = [0.0, 0.0]
-
-        # for controller
-        self.control_sampling_time = 0.001
-
-    # calculate derivative of state value
-    def calc_derivative(self, torque_reac):
-        return (self.xvec[1], - self.damping / self.inertia * self.xvec[1] + (1.0 / self.inertia) * (self.torque - torque_reac) )
-
-    # update 
-    def update(self):
-        self.xvec[0] = self.xvec[0] + self.dxvec[0] * self.sampling_time
-        self.xvec[1] = self.xvec[1] + self.dxvec[1] * self.sampling_time
 
 # simulation parameters
 inertia=0.1
@@ -79,15 +82,15 @@ xvec0_data=[]
 xvec1_data=[]
 cmd_data=[]
 
-# simulation object
-sim = RigidRotor(inertia, damping, torque, sampling_time, control_sampling_time)
-controller = Controller(control_sampling_time)
+# rigidrotorulation object
+rigidrotor = RigidRotor(inertia, damping, torque, sampling_time)
+controller = Controller(control_sampling_time, rigidrotor)
 
 # main loop 10[sec]
-for i in range(simulation_time*(int)(1/sim.sampling_time)):
-    time = i * sim.sampling_time
+for i in range(simulation_time*(int)(1/rigidrotor.sampling_time)):
+    time = i * rigidrotor.sampling_time
 
-    control_delay = (int)(sim.control_sampling_time/sim.sampling_time) #[sample]
+    control_delay = (int)(controller.dt / rigidrotor.sampling_time) #[sample]
     if i % control_delay == 0:
         """ controller """
         # definition for control parameters
@@ -99,23 +102,23 @@ for i in range(simulation_time*(int)(1/sim.sampling_time)):
         # pole assignment (second order vibration system)
         wn = 10.0
         zeta = 0.5
-        kp = wn**2 * sim.inertia
-        kd = 2.0 * zeta * wn * sim.inertia - sim.damping
+        kp = wn**2 * rigidrotor.inertia
+        kd = 2.0 * zeta * wn * rigidrotor.inertia - rigidrotor.damping
 
         # PID control
         theta_cmd = 1.0
-        theta_res = sim.xvec[0]
+        theta_res = rigidrotor.xvec[0]
         error = theta_cmd - theta_res
-        sim.torque = controller.pid_controller(error, kp, 0, kd, sim.control_sampling_time, 500.0)        
+        rigidrotor.torque = controller.pid_controller(error, kp, 0, kd, 500.0)        
 
-        sim.torque = sim.torque + dist
+        rigidrotor.torque = rigidrotor.torque + dist
 
         # DOB
-        dist = controller.disturbance_observer(inertia, sim.torque, sim.xvec[1], 300.0)
+        dist = controller.disturbance_observer(rigidrotor.torque, rigidrotor.xvec[1], 300.0)
 
         #data update
-        xvec0_data.append(sim.xvec[0])
-        xvec1_data.append(sim.xvec[1])
+        xvec0_data.append(rigidrotor.xvec[0])
+        xvec1_data.append(rigidrotor.xvec[1])
         cmd_data.append(theta_cmd)
 
         """ controller end """
@@ -126,14 +129,14 @@ for i in range(simulation_time*(int)(1/sim.sampling_time)):
         torque_reac = 10.0
 
     # derivative calculation
-    sim.dxvec = sim.calc_derivative(torque_reac)
+    rigidrotor.dxvec = rigidrotor.calc_derivative(torque_reac)
     # euler-integration
-    sim.update()
+    rigidrotor.update()
 
     """ plant end """
 
 # data plot
-time_data = np.arange(0, 3, sim.control_sampling_time)
+time_data = np.arange(0, 3, controller.dt)
 pl.plot(time_data, cmd_data[:], label="theta cmd")
 pl.plot(time_data, xvec0_data[:], label="theta res")
 pl.legend()
